@@ -1,0 +1,412 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+  name: blackboxmodules.module.monitoring.ruup.amadeus.net
+spec:
+  group: module.monitoring.ruup.amadeus.net
+  names:
+    kind: BlackboxModule
+    listKind: BlackboxModuleList
+    plural: blackboxmodules
+    singular: blackboxmodule
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BlackboxModule is the Schema for the blackboxmodules API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BlackboxModuleSpec defines the desired state of BlackboxModule
+            properties:
+              dns:
+                properties:
+                  preferredIpProtocol:
+                    default: ip4
+                    enum:
+                    - ip4
+                    - ip6
+                    type: string
+                  queryName:
+                    description: Required
+                    type: string
+                  queryType:
+                    default: A
+                    type: string
+                  sourceIpAddress:
+                    type: string
+                  transportProtocol:
+                    default: udp
+                    enum:
+                    - udp
+                    - tcp
+                    type: string
+                  validRCodes:
+                    items:
+                      type: string
+                    type: array
+                  validateAdditionalRRs:
+                    properties:
+                      failIfAllMatchRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfMatchesRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfNoneMatchRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfNotMatchesRegexp:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  validateAnswerRRs:
+                    properties:
+                      failIfAllMatchRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfMatchesRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfNoneMatchRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfNotMatchesRegexp:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  validateAuthorityRRs:
+                    properties:
+                      failIfAllMatchRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfMatchesRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfNoneMatchRegexp:
+                        items:
+                          type: string
+                        type: array
+                      failIfNotMatchesRegexp:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                required:
+                - queryName
+                type: object
+              grpc:
+                properties:
+                  ipProtocolFallback:
+                    default: true
+                    type: boolean
+                  preferredIpProtocol:
+                    default: ip4
+                    enum:
+                    - ip4
+                    - ip6
+                    type: string
+                  service:
+                    type: string
+                  tlsConfig:
+                    properties:
+                      caFile:
+                        type: string
+                      certFile:
+                        type: string
+                      insecureSkipVerify:
+                        default: false
+                        type: boolean
+                      keyFile:
+                        type: string
+                      serverName:
+                        type: string
+                    type: object
+                  useTls:
+                    default: false
+                    type: boolean
+                type: object
+              http:
+                properties:
+                  authorization:
+                    properties:
+                      credentials:
+                        type: string
+                      credentialsFile:
+                        type: string
+                      type:
+                        enum:
+                        - Bearer
+                        - Basic
+                        type: string
+                    type: object
+                  basicAuth:
+                    properties:
+                      password:
+                        type: string
+                      passwordFile:
+                        type: string
+                      username:
+                        type: string
+                    type: object
+                  body:
+                    type: string
+                  bodySizeLimit:
+                    default: 1048576
+                    type: integer
+                  compression:
+                    default: none
+                    enum:
+                    - none
+                    - gzip
+                    - deflate
+                    type: string
+                  failIfBodyJsonMatchesCel:
+                    type: string
+                  failIfBodyJsonNotMatchesCel:
+                    type: string
+                  failIfBodyMatchesRegexp:
+                    items:
+                      type: string
+                    type: array
+                  failIfBodyNotMatchesRegexp:
+                    items:
+                      type: string
+                    type: array
+                  failIfHeaderMatchesRegexp:
+                    items:
+                      properties:
+                        allowMissing:
+                          default: false
+                          type: boolean
+                        header:
+                          type: string
+                        regexp:
+                          type: string
+                      required:
+                      - header
+                      - regexp
+                      type: object
+                    type: array
+                  failIfHeaderNotMatchesRegexp:
+                    items:
+                      properties:
+                        allowMissing:
+                          default: false
+                          type: boolean
+                        header:
+                          type: string
+                        regexp:
+                          type: string
+                      required:
+                      - header
+                      - regexp
+                      type: object
+                    type: array
+                  failIfNotSsl:
+                    type: boolean
+                  failIfSsl:
+                    type: boolean
+                  followRedirects:
+                    default: true
+                    type: boolean
+                  headers:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  ipProtocolFallback:
+                    default: true
+                    type: boolean
+                  method:
+                    default: GET
+                    type: string
+                  noProxy:
+                    type: string
+                  oauth2:
+                    properties:
+                      clientId:
+                        type: string
+                      clientSecret:
+                        type: string
+                      clientSecretFile:
+                        type: string
+                      clientSecretRef:
+                        type: string
+                      endpointParams:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      noProxy:
+                        type: string
+                      proxyUrl:
+                        type: string
+                      scopes:
+                        items:
+                          type: string
+                        type: array
+                      tlsConfig:
+                        properties:
+                          caFile:
+                            type: string
+                          certFile:
+                            type: string
+                          insecureSkipVerify:
+                            default: false
+                            type: boolean
+                          keyFile:
+                            type: string
+                          serverName:
+                            type: string
+                        type: object
+                      tokenUrl:
+                        type: string
+                    type: object
+                  proxyConnectHeaders:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  proxyFromEnvironment:
+                    default: false
+                    type: boolean
+                  proxyUrl:
+                    type: string
+                  skipResolvePhaseWithProxy:
+                    default: false
+                    type: boolean
+                  tlsConfig:
+                    properties:
+                      caFile:
+                        type: string
+                      certFile:
+                        type: string
+                      insecureSkipVerify:
+                        default: false
+                        type: boolean
+                      keyFile:
+                        type: string
+                      serverName:
+                        type: string
+                    type: object
+                  validHttpVersions:
+                    default:
+                    - HTTP/1.1
+                    - HTTP/2
+                    items:
+                      type: string
+                    type: array
+                  validStatusCodes:
+                    default:
+                    - 200
+                    items:
+                      type: integer
+                    type: array
+                type: object
+              icmp:
+                properties:
+                  dontFragment:
+                    default: false
+                    type: boolean
+                  payloadSize:
+                    default: 24
+                    type: integer
+                  preferredIpProtocol:
+                    default: ip4
+                    enum:
+                    - ip4
+                    - ip6
+                    type: string
+                  sourceIpAddress:
+                    type: string
+                type: object
+              prober:
+                enum:
+                - http
+                - tcp
+                - icmp
+                - dns
+                - grpc
+                type: string
+              tcp:
+                properties:
+                  preferredIpProtocol:
+                    default: ip4
+                    enum:
+                    - ip4
+                    - ip6
+                    type: string
+                  queryResponse:
+                    items:
+                      properties:
+                        expect:
+                          type: string
+                        send:
+                          type: string
+                        startTls:
+                          default: false
+                          type: boolean
+                      type: object
+                    type: array
+                  sourceIpAddress:
+                    type: string
+                  tls:
+                    default: false
+                    type: boolean
+                  tlsConfig:
+                    properties:
+                      caFile:
+                        type: string
+                      certFile:
+                        type: string
+                      insecureSkipVerify:
+                        default: false
+                        type: boolean
+                      keyFile:
+                        type: string
+                      serverName:
+                        type: string
+                    type: object
+                type: object
+              timeout:
+                default: 5s
+                type: string
+            required:
+            - prober
+            type: object
+          status:
+            description: BlackboxModuleStatus defines the observed state of BlackboxModule
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
