@@ -18,6 +18,9 @@ package controller
 
 import (
 	"context"
+	"gopkg.in/yaml.v2"
+	"k8s.io/apimachinery/pkg/types"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	modulev1alpha1 "github.com/luweglarz/blackbox-module-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // BlackboxModuleReconciler reconciles a BlackboxModule object
@@ -47,9 +51,53 @@ type BlackboxModuleReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	// List all BlackboxModule resources
+	var blackboxModules modulev1alpha1.BlackboxModuleList
+	if err := r.List(ctx, &blackboxModules); err != nil {
+		logger.Error(err, "unable to list BlackboxModules")
+		return ctrl.Result{}, err
+	}
+
+	// Generate the new config
+	newConfig := make(map[string]interface{})
+	modules := make(map[string]interface{})
+
+	for _, module := range blackboxModules.Items {
+		modules[module.Name] = module.Spec
+	}
+	newConfig["modules"] = modules
+
+	newConfigYAML, err := yaml.Marshal(newConfig)
+	if err != nil {
+		logger.Error(err, "unable to marshal new blackbox config")
+		return ctrl.Result{}, err
+	}
+
+	// Get the target ConfigMap
+	configMapName := "blackbox-exporter-config" // modify to pass as parameter
+	namespace := "monitoring"                   // modify to pass as parameter
+	var configMap corev1.ConfigMap
+
+	err = r.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: namespace}, &configMap)
+	if err != nil {
+		logger.Error(err, "unable to get ConfigMap")
+		return ctrl.Result{}, err
+	}
+
+	// Compare and update if necessary
+	currentConfigYAML, ok := configMap.Data["config.yml"]
+	if !ok || !reflect.DeepEqual(string(newConfigYAML), currentConfigYAML) {
+		logger.Info("Updating Blackbox Exporter ConfigMap")
+		configMap.Data["config.yml"] = string(newConfigYAML)
+		if err := r.Update(ctx, &configMap); err != nil {
+			logger.Error(err, "unable to update ConfigMap")
+			return ctrl.Result{}, err
+		}
+	} else {
+		logger.Info("Blackbox Exporter configuration is already up to date")
+	}
 
 	return ctrl.Result{}, nil
 }
