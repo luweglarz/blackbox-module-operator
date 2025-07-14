@@ -18,9 +18,9 @@ package controller
 
 import (
 	"context"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -32,39 +32,73 @@ import (
 
 var _ = Describe("BlackboxModule Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = "blackbox-exporter-config"
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "monitoring", // TODO(user):Modify as needed
 		}
 		blackboxmodule := &modulev1alpha1.BlackboxModule{}
 
 		BeforeEach(func() {
+			// Create a namespace if it doesn't exist
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "monitoring",
+				},
+			}
+			_ = k8sClient.Create(ctx, namespace)
+			// Create a ConfigMap with initial data
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "blackbox-exporter-config",
+					Namespace: "monitoring",
+				},
+				Data: map[string]string{
+					"config.yml": "initial: config", // Provide initial data as needed
+				},
+			}
+			_ = k8sClient.Create(ctx, configMap) // Ignore error if already exists
 			By("creating the custom resource for the Kind BlackboxModule")
 			err := k8sClient.Get(ctx, typeNamespacedName, blackboxmodule)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &modulev1alpha1.BlackboxModule{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: "monitoring",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: modulev1alpha1.BlackboxModuleSpec{
+						Prober: "http", // Set to a supported value
+						// Add other required spec fields if needed
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
+			// Cleanup BlackboxModule resource
 			resource := &modulev1alpha1.BlackboxModule{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
 
-			By("Cleanup the specific resource instance BlackboxModule")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			// Cleanup ConfigMap
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, typeNamespacedName, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+
+			// Cleanup monitoring namespace
+			ns := &corev1.Namespace{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: "monitoring"}, ns)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+			}
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
@@ -80,5 +114,71 @@ var _ = Describe("BlackboxModule Controller", func() {
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
+	})
+})
+
+// Go
+var _ = Describe("BlackboxModule Controller - Aggregation", func() {
+	ctx := context.Background()
+	namespaces := []string{"ns1", "ns2"}
+	crNames := []string{"bbm1", "bbm2"}
+
+	BeforeEach(func() {
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "monitoring"},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "blackbox-exporter-config",
+				Namespace: "monitoring",
+			},
+			Data: map[string]string{"config.yml": "initial: config"},
+		})).To(Succeed())
+
+		// Create CRs in other namespaces
+		for _, ns := range namespaces {
+			Expect(k8sClient.Create(ctx, &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: ns},
+			})).To(Succeed())
+		}
+		for i, ns := range namespaces {
+			Expect(k8sClient.Create(ctx, &modulev1alpha1.BlackboxModule{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      crNames[i],
+					Namespace: ns,
+				},
+				Spec: modulev1alpha1.BlackboxModuleSpec{
+					Prober: "http",
+					HTTP: &modulev1alpha1.HTTPProbe{
+						Method: "GET",
+						Headers: map[string]string{
+							"X-Test": "true",
+						},
+					},
+				},
+			})).To(Succeed())
+		}
+	})
+
+	AfterEach(func() {
+		for i, ns := range namespaces {
+			resource := &modulev1alpha1.BlackboxModule{}
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: crNames[i], Namespace: ns}, resource)
+			_ = k8sClient.Delete(ctx, resource)
+		}
+	})
+
+	It("should aggregate CRs from multiple namespaces into the monitoring ConfigMap", func() {
+		reconciler := &BlackboxModuleReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		for i, ns := range namespaces {
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: crNames[i], Namespace: ns},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		cm := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "blackbox-exporter-config", Namespace: "monitoring"}, cm)).To(Succeed())
+		Expect(cm.Data["config.yml"]).NotTo(Equal("initial: config"))
 	})
 })
