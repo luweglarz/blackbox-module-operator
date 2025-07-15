@@ -103,8 +103,10 @@ var _ = Describe("BlackboxModule Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &BlackboxModuleReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:             k8sClient,
+				Scheme:             k8sClient.Scheme(),
+				ConfigMapNamespace: "monitoring",               // Ensure this matches the namespace where the ConfigMap is created
+				ConfigMapName:      "blackbox-exporter-config", // Ensure this matches the ConfigMap name
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -125,12 +127,12 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 
 	BeforeEach(func() {
 		Expect(k8sClient.Create(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: "monitoring"},
+			ObjectMeta: metav1.ObjectMeta{Name: "monitoring2"},
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "blackbox-exporter-config",
-				Namespace: "monitoring",
+				Namespace: "monitoring2",
 			},
 			Data: map[string]string{"config.yml": "initial: config"},
 		})).To(Succeed())
@@ -169,7 +171,12 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 	})
 
 	It("should aggregate CRs from multiple namespaces into the monitoring ConfigMap", func() {
-		reconciler := &BlackboxModuleReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		reconciler := &BlackboxModuleReconciler{
+			Client:             k8sClient,
+			Scheme:             k8sClient.Scheme(),
+			ConfigMapNamespace: "monitoring2",              // Ensure this matches the namespace where the ConfigMap is created
+			ConfigMapName:      "blackbox-exporter-config", // Ensure this matches the ConfigMap name
+		}
 		for i, ns := range namespaces {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: crNames[i], Namespace: ns},
@@ -178,7 +185,7 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 		}
 
 		cm := &corev1.ConfigMap{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "blackbox-exporter-config", Namespace: "monitoring"}, cm)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "blackbox-exporter-config", Namespace: "monitoring2"}, cm)).To(Succeed())
 		Expect(cm.Data["config.yml"]).NotTo(Equal("initial: config"))
 	})
 })

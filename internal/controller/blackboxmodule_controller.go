@@ -34,7 +34,9 @@ import (
 // BlackboxModuleReconciler reconciles a BlackboxModule object
 type BlackboxModuleReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	ConfigMapNamespace string
+	ConfigMapName      string
 }
 
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules,verbs=get;list;watch;create;update;patch;delete
@@ -75,12 +77,8 @@ func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// Get the target ConfigMap
-	configMapName := "blackbox-exporter-config" // modify to pass as parameter
-	namespace := "monitoring"                   // modify to pass as parameter
 	var configMap corev1.ConfigMap
-
-	err = r.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: namespace}, &configMap)
+	err = r.Get(ctx, types.NamespacedName{Name: r.ConfigMapName, Namespace: r.ConfigMapNamespace}, &configMap)
 	if err != nil {
 		logger.Error(err, "unable to get ConfigMap")
 		return ctrl.Result{}, err
