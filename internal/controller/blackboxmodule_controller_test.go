@@ -20,6 +20,7 @@ import (
 	"context"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -105,16 +106,32 @@ var _ = Describe("BlackboxModule Controller", func() {
 			controllerReconciler := &BlackboxModuleReconciler{
 				Client:             k8sClient,
 				Scheme:             k8sClient.Scheme(),
-				ConfigMapNamespace: "monitoring",               // Ensure this matches the namespace where the ConfigMap is created
-				ConfigMapName:      "blackbox-exporter-config", // Ensure this matches the ConfigMap name
+				ConfigMapNamespace: "monitoring",
+				ConfigMapName:      "blackbox-exporter-config",
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			By("Verifying the ConfigMap contains correct YAML with snake_case keys")
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "blackbox-exporter-config",
+				Namespace: "monitoring",
+			}, cm)).To(Succeed())
+
+			var config map[string]interface{}
+			Expect(yaml.Unmarshal([]byte(cm.Data["config.yml"]), &config)).To(Succeed())
+
+			modules, ok := config["modules"].(map[interface{}]interface{})
+			Expect(ok).To(BeTrue())
+			Expect(modules).To(HaveKey("blackbox-exporter-config"))
+
+			moduleData, ok := modules["blackbox-exporter-config"].(map[interface{}]interface{})
+			Expect(ok).To(BeTrue())
+			Expect(moduleData["prober"]).To(Equal("http"))
 		})
 	})
 })
@@ -174,8 +191,8 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 		reconciler := &BlackboxModuleReconciler{
 			Client:             k8sClient,
 			Scheme:             k8sClient.Scheme(),
-			ConfigMapNamespace: "monitoring2",              // Ensure this matches the namespace where the ConfigMap is created
-			ConfigMapName:      "blackbox-exporter-config", // Ensure this matches the ConfigMap name
+			ConfigMapNamespace: "monitoring2",
+			ConfigMapName:      "blackbox-exporter-config",
 		}
 		for i, ns := range namespaces {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -187,5 +204,22 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 		cm := &corev1.ConfigMap{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "blackbox-exporter-config", Namespace: "monitoring2"}, cm)).To(Succeed())
 		Expect(cm.Data["config.yml"]).NotTo(Equal("initial: config"))
+
+		By("Verifying YAML uses snake_case keys")
+		var config map[string]interface{}
+		Expect(yaml.Unmarshal([]byte(cm.Data["config.yml"]), &config)).To(Succeed())
+
+		modules, ok := config["modules"].(map[interface{}]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(modules).To(HaveKey("bbm1"))
+		Expect(modules).To(HaveKey("bbm2"))
+
+		// Verify the HTTP probe has snake_case keys
+		bbm1, ok := modules["bbm1"].(map[interface{}]interface{})
+		Expect(ok).To(BeTrue())
+		httpProbe, ok := bbm1["http"].(map[interface{}]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(httpProbe).To(HaveKey("method"))
+		Expect(httpProbe).To(HaveKey("headers"))
 	})
 })
