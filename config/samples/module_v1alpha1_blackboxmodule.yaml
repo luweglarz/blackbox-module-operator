@@ -4,6 +4,15 @@ metadata:
   labels:
     app.kubernetes.io/name: blackbox-module-operator
     app.kubernetes.io/managed-by: kustomize
-  name: blackboxmodule-sample
+  name: http-2xx
 spec:
-  # TODO(user): Add fields here
+  prober: http
+  timeout: "5s"
+  http:
+    validStatusCodes: [200, 201, 202]
+    validHttpVersions: ["HTTP/1.1", "HTTP/2"]
+    method: GET
+    followRedirects: true
+    failIfNotSsl: false
+    tlsConfig:
+      insecureSkipVerify: false
