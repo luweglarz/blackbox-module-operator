@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -62,6 +63,7 @@ func main() {
 	var configMapNamespace string
 	var configMapName string
 	var blackboxReloadURL string
+	var reloadDelay time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -75,6 +77,7 @@ func main() {
 	flag.StringVar(&configMapNamespace, "configmap-namespace", "monitoring", "The namespace where the blackbox_exporter ConfigMap is located.")
 	flag.StringVar(&configMapName, "configmap-name", "blackbox-exporter-config", "The name of the ConfigMap used for the blackbox_exporter configuration.")
 	flag.StringVar(&blackboxReloadURL, "blackbox-reload-url", "", "URL to trigger blackbox_exporter config reload (e.g. http://blackbox-exporter.monitoring.svc:9115/-/reload). Requires --web.enable-lifecycle on blackbox_exporter.")
+	flag.DurationVar(&reloadDelay, "reload-delay", 10*time.Second, "Delay before triggering reload to allow ConfigMap volume propagation.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -156,6 +159,7 @@ func main() {
 		ConfigMapNamespace: configMapNamespace,
 		ConfigMapName:      configMapName,
 		ReloadURL:          blackboxReloadURL,
+		ReloadDelay:        reloadDelay,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BlackboxModule")
 		os.Exit(1)

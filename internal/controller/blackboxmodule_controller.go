@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"time"
 
 	"gopkg.in/yaml.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +45,7 @@ type BlackboxModuleReconciler struct {
 	ConfigMapNamespace string
 	ConfigMapName      string
 	ReloadURL          string
+	ReloadDelay        time.Duration
 }
 
 const blackboxModuleFinalizer = "module.monitoring.ruup.amadeus.net/finalizer"
@@ -194,6 +196,14 @@ func (r *BlackboxModuleReconciler) triggerReload(ctx context.Context) error {
 		return nil
 	}
 	logger := log.FromContext(ctx)
+	if r.ReloadDelay > 0 {
+		logger.Info("Waiting for ConfigMap volume propagation", "delay", r.ReloadDelay)
+		select {
+		case <-time.After(r.ReloadDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	logger.Info("Triggering blackbox_exporter reload", "url", r.ReloadURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.ReloadURL, nil)
@@ -204,7 +214,7 @@ func (r *BlackboxModuleReconciler) triggerReload(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sending reload request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("reload request returned status %d", resp.StatusCode)
 	}
