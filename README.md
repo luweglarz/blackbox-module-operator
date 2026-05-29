@@ -1,8 +1,33 @@
 # blackbox-module-operator
-// TODO(user): Add simple overview of use/purpose
+
+A Kubernetes operator that manages [blackbox_exporter](https://github.com/prometheus/blackbox_exporter) probe modules as custom resources. Instead of manually editing a monolithic ConfigMap, you define individual `BlackboxModule` CRs and the operator aggregates them into the blackbox_exporter configuration.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+This operator watches `BlackboxModule` custom resources and reconciles them into a single ConfigMap consumed by blackbox_exporter. This enables:
+
+- **GitOps-friendly** probe module management — each module is its own CR
+- **Team-scoped ownership** — RBAC controls who can create/modify which modules
+- **Automatic aggregation** — all modules are merged into the blackbox_exporter `config.yml`
+
+### Example
+
+```yaml
+apiVersion: module.monitoring.ruup.amadeus.net/v1alpha1
+kind: BlackboxModule
+metadata:
+  name: http-2xx
+spec:
+  prober: http
+  timeout: "5s"
+  http:
+    validStatusCodes: [200, 201, 202]
+    method: GET
+    followRedirects: true
+    failIfNotSsl: true
+    tlsConfig:
+      insecureSkipVerify: false
+```
 
 ## Getting Started
 
@@ -11,6 +36,18 @@
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
+
+### Configuration
+
+The operator accepts the following flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--configmap-namespace` | `monitoring` | Namespace of the blackbox_exporter ConfigMap |
+| `--configmap-name` | `blackbox-exporter-config` | Name of the ConfigMap to manage |
+| `--metrics-bind-address` | `0` | Address for the metrics endpoint |
+| `--health-probe-bind-address` | `:8081` | Address for health probes |
+| `--leader-elect` | `false` | Enable leader election for HA |
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
@@ -90,7 +127,8 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/blackbox-module-operato
 ```
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+
+Contributions are welcome. Please open an issue or submit a pull request.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
