@@ -119,7 +119,8 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 		if module.DeletionTimestamp != nil {
 			continue
 		}
-		modules[module.Name] = module.Spec
+		moduleKey := module.Namespace + "/" + module.Name
+		modules[moduleKey] = module.Spec
 	}
 	newConfig["modules"] = modules
 
