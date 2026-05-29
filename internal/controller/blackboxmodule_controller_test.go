@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"gopkg.in/yaml.v2"
@@ -127,9 +128,9 @@ var _ = Describe("BlackboxModule Controller", func() {
 
 			modules, ok := config["modules"].(map[interface{}]interface{})
 			Expect(ok).To(BeTrue())
-			Expect(modules).To(HaveKey("blackbox-exporter-config"))
+			Expect(modules).To(HaveKey("monitoring/blackbox-exporter-config"))
 
-			moduleData, ok := modules["blackbox-exporter-config"].(map[interface{}]interface{})
+			moduleData, ok := modules["monitoring/blackbox-exporter-config"].(map[interface{}]interface{})
 			Expect(ok).To(BeTrue())
 			Expect(moduleData["prober"]).To(Equal("http"))
 		})
@@ -211,11 +212,11 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 
 		modules, ok := config["modules"].(map[interface{}]interface{})
 		Expect(ok).To(BeTrue())
-		Expect(modules).To(HaveKey("bbm1"))
-		Expect(modules).To(HaveKey("bbm2"))
+		Expect(modules).To(HaveKey("ns1/bbm1"))
+		Expect(modules).To(HaveKey("ns2/bbm2"))
 
 		// Verify the HTTP probe has snake_case keys
-		bbm1, ok := modules["bbm1"].(map[interface{}]interface{})
+		bbm1, ok := modules["ns1/bbm1"].(map[interface{}]interface{})
 		Expect(ok).To(BeTrue())
 		httpProbe, ok := bbm1["http"].(map[interface{}]interface{})
 		Expect(ok).To(BeTrue())
