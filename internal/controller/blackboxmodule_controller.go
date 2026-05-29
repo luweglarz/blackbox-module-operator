@@ -49,7 +49,7 @@ const blackboxModuleFinalizer = "module.monitoring.ruup.amadeus.net/finalizer"
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -134,9 +134,29 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 	var configMap corev1.ConfigMap
 	err = r.Get(ctx, types.NamespacedName{Name: r.ConfigMapName, Namespace: r.ConfigMapNamespace}, &configMap)
 	if err != nil {
-		logger.Error(err, "unable to get ConfigMap")
-		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapNotFound", err.Error())
-		return ctrl.Result{}, err
+		if client.IgnoreNotFound(err) != nil {
+			logger.Error(err, "unable to get ConfigMap")
+			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapError", err.Error())
+			return ctrl.Result{}, err
+		}
+		// ConfigMap doesn't exist — create it
+		logger.Info("ConfigMap not found, creating it")
+		configMap = corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      r.ConfigMapName,
+				Namespace: r.ConfigMapNamespace,
+			},
+			Data: map[string]string{
+				"config.yml": string(newConfigYAML),
+			},
+		}
+		if err := r.Create(ctx, &configMap); err != nil {
+			logger.Error(err, "unable to create ConfigMap")
+			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapCreateFailed", err.Error())
+			return ctrl.Result{}, err
+		}
+		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
+		return ctrl.Result{}, nil
 	}
 
 	// Compare and update if necessary
