@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"reflect"
 
 	"gopkg.in/yaml.v2"
@@ -42,6 +43,7 @@ type BlackboxModuleReconciler struct {
 	Scheme             *runtime.Scheme
 	ConfigMapNamespace string
 	ConfigMapName      string
+	ReloadURL          string
 }
 
 const blackboxModuleFinalizer = "module.monitoring.ruup.amadeus.net/finalizer"
@@ -155,6 +157,11 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapCreateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
+		if err := r.triggerReload(ctx); err != nil {
+			logger.Error(err, "failed to trigger blackbox_exporter reload")
+			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ReloadFailed", err.Error())
+			return ctrl.Result{}, err
+		}
 		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
 		return ctrl.Result{}, nil
 	}
@@ -169,12 +176,39 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "UpdateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
+		if err := r.triggerReload(ctx); err != nil {
+			logger.Error(err, "failed to trigger blackbox_exporter reload")
+			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ReloadFailed", err.Error())
+			return ctrl.Result{}, err
+		}
 	} else {
 		logger.Info("Blackbox Exporter configuration is already up to date")
 	}
 
 	r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
 	return ctrl.Result{}, nil
+}
+
+func (r *BlackboxModuleReconciler) triggerReload(ctx context.Context) error {
+	if r.ReloadURL == "" {
+		return nil
+	}
+	logger := log.FromContext(ctx)
+	logger.Info("Triggering blackbox_exporter reload", "url", r.ReloadURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.ReloadURL, nil)
+	if err != nil {
+		return fmt.Errorf("creating reload request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("sending reload request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("reload request returned status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (r *BlackboxModuleReconciler) setConditionForAll(ctx context.Context, modules *modulev1alpha1.BlackboxModuleList, status metav1.ConditionStatus, reason, message string) {

@@ -61,6 +61,7 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 	var configMapNamespace string
 	var configMapName string
+	var blackboxReloadURL string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -73,6 +74,7 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&configMapNamespace, "configmap-namespace", "monitoring", "The namespace where the blackbox_exporter ConfigMap is located.")
 	flag.StringVar(&configMapName, "configmap-name", "blackbox-exporter-config", "The name of the ConfigMap used for the blackbox_exporter configuration.")
+	flag.StringVar(&blackboxReloadURL, "blackbox-reload-url", "", "URL to trigger blackbox_exporter config reload (e.g. http://blackbox-exporter.monitoring.svc:9115/-/reload). Requires --web.enable-lifecycle on blackbox_exporter.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -153,6 +155,7 @@ func main() {
 		Scheme:             mgr.GetScheme(),
 		ConfigMapNamespace: configMapNamespace,
 		ConfigMapName:      configMapName,
+		ReloadURL:          blackboxReloadURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BlackboxModule")
 		os.Exit(1)

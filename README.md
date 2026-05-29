@@ -29,6 +29,16 @@ spec:
       insecureSkipVerify: false
 ```
 
+## How It Works
+
+1. You create `BlackboxModule` custom resources (one per probe module) in any namespace.
+2. The operator watches all `BlackboxModule` CRs and aggregates them into a single ConfigMap (default: `blackbox-exporter-config` in the `monitoring` namespace).
+3. The ConfigMap is created automatically if it doesn't exist.
+4. Each module is keyed as `<namespace>/<name>` in the `config.yml` data.
+5. After updating the ConfigMap, the operator triggers a reload on blackbox_exporter via its `/-/reload` HTTP endpoint (if `--blackbox-reload-url` is configured).
+
+> **Note:** blackbox_exporter must be started with `--web.enable-lifecycle` for the reload endpoint to work.
+
 ## Getting Started
 
 ### Prerequisites
@@ -45,6 +55,7 @@ The operator accepts the following flags:
 |------|---------|-------------|
 | `--configmap-namespace` | `monitoring` | Namespace of the blackbox_exporter ConfigMap |
 | `--configmap-name` | `blackbox-exporter-config` | Name of the ConfigMap to manage |
+| `--blackbox-reload-url` | *(empty)* | URL to trigger blackbox_exporter reload (e.g. `http://blackbox-exporter.monitoring.svc:9115/-/reload`) |
 | `--metrics-bind-address` | `0` | Address for the metrics endpoint |
 | `--health-probe-bind-address` | `:8081` | Address for health probes |
 | `--leader-elect` | `false` | Enable leader election for HA |
