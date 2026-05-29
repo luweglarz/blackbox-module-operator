@@ -27,7 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	modulev1alpha1 "github.com/luweglarz/blackbox-module-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -155,5 +157,24 @@ func containsCondition(conditions []metav1.Condition, condType string) bool {
 func (r *BlackboxModuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&modulev1alpha1.BlackboxModule{}).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(
+			func(ctx context.Context, obj client.Object) []reconcile.Request {
+				if obj.GetName() != r.ConfigMapName || obj.GetNamespace() != r.ConfigMapNamespace {
+					return nil
+				}
+				// Re-queue all BlackboxModules to trigger a full re-sync
+				var modules modulev1alpha1.BlackboxModuleList
+				if err := mgr.GetClient().List(ctx, &modules); err != nil {
+					return nil
+				}
+				var requests []reconcile.Request
+				for _, m := range modules.Items {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{Name: m.Name, Namespace: m.Namespace},
+					})
+				}
+				return requests
+			},
+		)).
 		Complete(r)
 }
