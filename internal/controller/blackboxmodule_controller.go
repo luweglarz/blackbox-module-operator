@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
-	"gopkg.in/yaml.v2"
-	"k8s.io/apimachinery/pkg/types"
+	"fmt"
 	"reflect"
 
+	"gopkg.in/yaml.v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -60,6 +62,7 @@ func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var blackboxModules modulev1alpha1.BlackboxModuleList
 	if err := r.List(ctx, &blackboxModules); err != nil {
 		logger.Error(err, "unable to list BlackboxModules")
+		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ListFailed", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -75,6 +78,7 @@ func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	newConfigYAML, err := yaml.Marshal(newConfig)
 	if err != nil {
 		logger.Error(err, "unable to marshal new blackbox config")
+		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "MarshalFailed", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -82,6 +86,7 @@ func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	err = r.Get(ctx, types.NamespacedName{Name: r.ConfigMapName, Namespace: r.ConfigMapNamespace}, &configMap)
 	if err != nil {
 		logger.Error(err, "unable to get ConfigMap")
+		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapNotFound", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -92,13 +97,58 @@ func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		configMap.Data["config.yml"] = string(newConfigYAML)
 		if err := r.Update(ctx, &configMap); err != nil {
 			logger.Error(err, "unable to update ConfigMap")
+			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "UpdateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
 	} else {
 		logger.Info("Blackbox Exporter configuration is already up to date")
 	}
 
+	r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
 	return ctrl.Result{}, nil
+}
+
+func (r *BlackboxModuleReconciler) setConditionForAll(ctx context.Context, modules *modulev1alpha1.BlackboxModuleList, status metav1.ConditionStatus, reason, message string) {
+	logger := log.FromContext(ctx)
+	for i := range modules.Items {
+		module := &modules.Items[i]
+		condition := metav1.Condition{
+			Type:               "ConfigSynced",
+			Status:             status,
+			ObservedGeneration: module.Generation,
+			LastTransitionTime: metav1.Now(),
+			Reason:             reason,
+			Message:            fmt.Sprintf("%s/%s: %s", module.Namespace, module.Name, message),
+		}
+		changed := false
+		for j, c := range module.Status.Conditions {
+			if c.Type == "ConfigSynced" {
+				if c.Status != status || c.Reason != reason {
+					module.Status.Conditions[j] = condition
+					changed = true
+				}
+				break
+			}
+		}
+		if !changed && len(module.Status.Conditions) == 0 || !containsCondition(module.Status.Conditions, "ConfigSynced") {
+			module.Status.Conditions = append(module.Status.Conditions, condition)
+			changed = true
+		}
+		if changed {
+			if err := r.Status().Update(ctx, module); err != nil {
+				logger.Error(err, "unable to update status", "module", module.Name)
+			}
+		}
+	}
+}
+
+func containsCondition(conditions []metav1.Condition, condType string) bool {
+	for _, c := range conditions {
+		if c.Type == condType {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupWithManager sets up the controller with the Manager.
