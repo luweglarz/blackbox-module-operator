@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -43,6 +44,8 @@ type BlackboxModuleReconciler struct {
 	ConfigMapName      string
 }
 
+const blackboxModuleFinalizer = "module.monitoring.ruup.amadeus.net/finalizer"
+
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules/finalizers,verbs=update
@@ -58,6 +61,46 @@ type BlackboxModuleReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *BlackboxModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	_ = log.FromContext(ctx)
+
+	// Fetch the triggering BlackboxModule to handle finalizer
+	var module modulev1alpha1.BlackboxModule
+	if err := r.Get(ctx, req.NamespacedName, &module); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// Object deleted and already gone — still re-sync the config
+			return r.syncConfig(ctx)
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Handle finalizer
+	if module.DeletionTimestamp != nil {
+		if controllerutil.ContainsFinalizer(&module, blackboxModuleFinalizer) {
+			// Re-sync config without this module (it won't appear in List since it's terminating)
+			result, err := r.syncConfig(ctx)
+			if err != nil {
+				return result, err
+			}
+			controllerutil.RemoveFinalizer(&module, blackboxModuleFinalizer)
+			if err := r.Update(ctx, &module); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(&module, blackboxModuleFinalizer) {
+		controllerutil.AddFinalizer(&module, blackboxModuleFinalizer)
+		if err := r.Update(ctx, &module); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return r.syncConfig(ctx)
+}
+
+func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// List all BlackboxModule resources
