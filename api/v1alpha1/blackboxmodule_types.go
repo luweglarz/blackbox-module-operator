@@ -54,11 +54,12 @@ type HTTPProbe struct {
 	Method string `json:"method,omitempty" yaml:"method,omitempty"`
 	// +optional
 	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	// +kubebuilder:default=1048576
+	// BodySizeLimit caps the response body blackbox_exporter will read. It is a
+	// base-2 byte size string as understood by blackbox_exporter (e.g. "1MB", "512KB").
+	// Leave unset for no limit. A bare integer is rejected by blackbox_exporter.
 	// +optional
-	BodySizeLimit int `json:"bodySizeLimit,omitempty" yaml:"body_size_limit,omitempty"`
-	// +kubebuilder:default=none
-	// +kubebuilder:validation:Enum=none;gzip;deflate
+	BodySizeLimit string `json:"bodySizeLimit,omitempty" yaml:"body_size_limit,omitempty"`
+	// +kubebuilder:validation:Enum=gzip;deflate;identity
 	// +optional
 	Compression string `json:"compression,omitempty" yaml:"compression,omitempty"`
 	// +kubebuilder:default=true

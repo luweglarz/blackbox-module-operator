@@ -182,14 +182,16 @@ spec:
                   body:
                     type: string
                   bodySizeLimit:
-                    default: 1048576
-                    type: integer
+                    description: |-
+                      BodySizeLimit caps the response body blackbox_exporter will read. It is a
+                      base-2 byte size string as understood by blackbox_exporter (e.g. "1MB", "512KB").
+                      Leave unset for no limit. A bare integer is rejected by blackbox_exporter.
+                    type: string
                   compression:
-                    default: none
                     enum:
-                    - none
                     - gzip
                     - deflate
+                    - identity
                     type: string
                   failIfBodyJsonMatchesCel:
                     type: string
