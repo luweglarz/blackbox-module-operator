@@ -18,6 +18,9 @@ package controller
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -222,5 +225,82 @@ var _ = Describe("BlackboxModule Controller - Aggregation", func() {
 		Expect(ok).To(BeTrue())
 		Expect(httpProbe).To(HaveKey("method"))
 		Expect(httpProbe).To(HaveKey("headers"))
+	})
+})
+
+var _ = Describe("BlackboxModule Controller - Reload retry", func() {
+	ctx := context.Background()
+	const ns = "reload-test"
+	const cmName = "blackbox-exporter-config"
+	const moduleName = "bbm-reload"
+
+	BeforeEach(func() {
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &modulev1alpha1.BlackboxModule{
+			ObjectMeta: metav1.ObjectMeta{Name: moduleName, Namespace: ns},
+			Spec: modulev1alpha1.BlackboxModuleSpec{
+				Prober: "http",
+				HTTP:   &modulev1alpha1.HTTPProbe{Method: "GET"},
+			},
+		})).To(Succeed())
+	})
+
+	AfterEach(func() {
+		module := &modulev1alpha1.BlackboxModule{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: moduleName, Namespace: ns}, module); err == nil {
+			module.Finalizers = nil
+			_ = k8sClient.Update(ctx, module)
+			_ = k8sClient.Delete(ctx, module)
+		}
+	})
+
+	It("retries the reload on a later reconcile after a transient reload failure", func() {
+		var calls int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// Fail the very first reload attempt, then succeed.
+			if atomic.AddInt32(&calls, 1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		reconciler := &BlackboxModuleReconciler{
+			Client:             k8sClient,
+			Scheme:             k8sClient.Scheme(),
+			ConfigMapNamespace: ns,
+			ConfigMapName:      cmName,
+			ReloadURL:          server.URL,
+		}
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: moduleName, Namespace: ns}}
+
+		By("failing the first reconcile because the reload endpoint errored")
+		_, err := reconciler.Reconcile(ctx, req)
+		Expect(err).To(HaveOccurred())
+
+		By("verifying the ConfigMap was written but not yet marked as reloaded")
+		cm := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: ns}, cm)).To(Succeed())
+		Expect(cm.Data).To(HaveKey("config.yml"))
+		Expect(cm.Annotations).NotTo(HaveKey(reloadedHashAnnotation))
+
+		By("succeeding on the next reconcile even though the config did not change")
+		_, err = reconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(atomic.LoadInt32(&calls)).To(Equal(int32(2)))
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: ns}, cm)).To(Succeed())
+		Expect(cm.Annotations).To(HaveKey(reloadedHashAnnotation))
+		reloadedHash := cm.Annotations[reloadedHashAnnotation]
+
+		By("not reloading again once the config is already marked as reloaded")
+		_, err = reconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(atomic.LoadInt32(&calls)).To(Equal(int32(2)))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: ns}, cm)).To(Succeed())
+		Expect(cm.Annotations[reloadedHashAnnotation]).To(Equal(reloadedHash))
 	})
 })
