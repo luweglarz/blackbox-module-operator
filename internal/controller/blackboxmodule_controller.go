@@ -47,7 +47,12 @@ type BlackboxModuleReconciler struct {
 	ConfigMapName      string
 	ReloadURL          string
 	ReloadDelay        time.Duration
+	ReloadTimeout      time.Duration
 }
+
+// defaultReloadTimeout bounds a single reload request when ReloadTimeout is unset,
+// so a hung blackbox_exporter cannot block a reconcile worker indefinitely.
+const defaultReloadTimeout = 30 * time.Second
 
 const blackboxModuleFinalizer = "module.luweglarz.dev/finalizer"
 
@@ -236,7 +241,14 @@ func (r *BlackboxModuleReconciler) triggerReload(ctx context.Context) error {
 	}
 	logger.Info("Triggering blackbox_exporter reload", "url", r.ReloadURL)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.ReloadURL, nil)
+	timeout := r.ReloadTimeout
+	if timeout <= 0 {
+		timeout = defaultReloadTimeout
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, r.ReloadURL, nil)
 	if err != nil {
 		return fmt.Errorf("creating reload request: %w", err)
 	}

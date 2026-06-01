@@ -37,7 +37,7 @@ spec:
 4. Each module is keyed as `<namespace>/<name>` in the `config.yml` data.
 5. After updating the ConfigMap, the operator triggers a reload on blackbox_exporter via its `/-/reload` HTTP endpoint (if `--blackbox-reload-url` is configured).
 
-> **Note:** blackbox_exporter serves the `/-/reload` endpoint by default (it can also reload on `SIGHUP`), so no extra flag is required. The ConfigMap is consumed as a mounted volume, so there is a propagation delay between the operator updating the ConfigMap and the new file being visible to the blackbox_exporter pod; `--reload-delay` accounts for this before the reload is triggered.
+> **Note:** the `/-/reload` endpoint is only served when blackbox_exporter is started with `--web.enable-lifecycle` (it can otherwise reload on `SIGHUP`). The ConfigMap is consumed as a mounted volume, so there is a propagation delay between the operator updating the ConfigMap and the new file being visible to the blackbox_exporter pod; `--reload-delay` accounts for this before the reload is triggered.
 
 ### Secrets
 
@@ -60,6 +60,8 @@ The operator accepts the following flags:
 | `--configmap-namespace` | `monitoring` | Namespace of the blackbox_exporter ConfigMap |
 | `--configmap-name` | `blackbox-exporter-config` | Name of the ConfigMap to manage |
 | `--blackbox-reload-url` | *(empty)* | URL to trigger blackbox_exporter reload (e.g. `http://blackbox-exporter.monitoring.svc:9115/-/reload`) |
+| `--reload-delay` | `10s` | Delay before triggering reload, to allow ConfigMap volume propagation |
+| `--reload-timeout` | `30s` | Timeout for a single blackbox_exporter reload request |
 | `--metrics-bind-address` | `0` | Address for the metrics endpoint |
 | `--health-probe-bind-address` | `:8081` | Address for health probes |
 | `--leader-elect` | `false` | Enable leader election for HA |
