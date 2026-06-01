@@ -39,6 +39,10 @@ spec:
 
 > **Note:** blackbox_exporter must be started with `--web.enable-lifecycle` for the reload endpoint to work.
 
+### Secrets
+
+Because every module spec is serialized into the shared ConfigMap, credentials must **not** be set inline — they would be persisted in plaintext and readable by anyone with `get` access to the ConfigMap. The validating webhook rejects inline `http.basicAuth.password`, `http.authorization.credentials`, and `http.oauth2.clientSecret`. Use the file- or secret-ref-based variants instead (`passwordFile`, `credentialsFile`, `clientSecretFile`/`clientSecretRef`), mounting the secret into the blackbox_exporter pod.
+
 ## Getting Started
 
 ### Prerequisites
