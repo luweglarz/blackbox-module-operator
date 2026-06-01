@@ -64,6 +64,7 @@ func main() {
 	var configMapName string
 	var blackboxReloadURL string
 	var reloadDelay time.Duration
+	var reloadTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -78,6 +79,7 @@ func main() {
 	flag.StringVar(&configMapName, "configmap-name", "blackbox-exporter-config", "The name of the ConfigMap used for the blackbox_exporter configuration.")
 	flag.StringVar(&blackboxReloadURL, "blackbox-reload-url", "", "URL to trigger blackbox_exporter config reload (e.g. http://blackbox-exporter.monitoring.svc:9115/-/reload). Requires --web.enable-lifecycle on blackbox_exporter.")
 	flag.DurationVar(&reloadDelay, "reload-delay", 10*time.Second, "Delay before triggering reload to allow ConfigMap volume propagation.")
+	flag.DurationVar(&reloadTimeout, "reload-timeout", 30*time.Second, "Timeout for a single blackbox_exporter reload request.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -160,6 +162,7 @@ func main() {
 		ConfigMapName:      configMapName,
 		ReloadURL:          blackboxReloadURL,
 		ReloadDelay:        reloadDelay,
+		ReloadTimeout:      reloadTimeout,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BlackboxModule")
 		os.Exit(1)
