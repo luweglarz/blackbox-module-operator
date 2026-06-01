@@ -18,9 +18,10 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
-	"reflect"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -49,6 +50,11 @@ type BlackboxModuleReconciler struct {
 }
 
 const blackboxModuleFinalizer = "module.monitoring.ruup.amadeus.net/finalizer"
+
+// reloadedHashAnnotation records the SHA-256 of the config.yml that blackbox_exporter
+// was last successfully told to reload. It lets reloads be retried independently of
+// ConfigMap writes, so a transient reload failure is not silently lost.
+const reloadedHashAnnotation = "module.monitoring.ruup.amadeus.net/reloaded-config-hash"
 
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=module.monitoring.ruup.amadeus.net,resources=blackboxmodules/status,verbs=get;update;patch
@@ -159,36 +165,60 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapCreateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		if err := r.triggerReload(ctx); err != nil {
-			logger.Error(err, "failed to trigger blackbox_exporter reload")
-			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ReloadFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
-		return ctrl.Result{}, nil
-	}
-
-	// Compare and update if necessary
-	currentConfigYAML, ok := configMap.Data["config.yml"]
-	if !ok || !reflect.DeepEqual(string(newConfigYAML), currentConfigYAML) {
+	} else if configMap.Data["config.yml"] != string(newConfigYAML) {
 		logger.Info("Updating Blackbox Exporter ConfigMap")
+		if configMap.Data == nil {
+			configMap.Data = make(map[string]string)
+		}
 		configMap.Data["config.yml"] = string(newConfigYAML)
 		if err := r.Update(ctx, &configMap); err != nil {
 			logger.Error(err, "unable to update ConfigMap")
 			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "UpdateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		if err := r.triggerReload(ctx); err != nil {
-			logger.Error(err, "failed to trigger blackbox_exporter reload")
-			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ReloadFailed", err.Error())
-			return ctrl.Result{}, err
-		}
 	} else {
 		logger.Info("Blackbox Exporter configuration is already up to date")
 	}
 
+	// Trigger a reload whenever the live config differs from what blackbox_exporter
+	// last reloaded. Reload state is tracked via an annotation on the ConfigMap rather
+	// than inferred from the write above, so a transient reload failure is retried on
+	// the next reconcile even when the ConfigMap data itself did not change.
+	if r.ReloadURL != "" {
+		newHash := hashConfig(newConfigYAML)
+		if configMap.Annotations[reloadedHashAnnotation] != newHash {
+			if err := r.triggerReload(ctx); err != nil {
+				logger.Error(err, "failed to trigger blackbox_exporter reload")
+				r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ReloadFailed", err.Error())
+				return ctrl.Result{}, err
+			}
+			if err := r.recordReloadedHash(ctx, &configMap, newHash); err != nil {
+				logger.Error(err, "unable to record reloaded config hash")
+				r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "AnnotationUpdateFailed", err.Error())
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
 	return ctrl.Result{}, nil
+}
+
+// hashConfig returns the hex-encoded SHA-256 of the given config bytes.
+func hashConfig(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// recordReloadedHash stamps the ConfigMap with the hash of the config that was just
+// reloaded, so subsequent reconciles know a reload is no longer pending.
+func (r *BlackboxModuleReconciler) recordReloadedHash(ctx context.Context, configMap *corev1.ConfigMap, hash string) error {
+	patch := client.MergeFrom(configMap.DeepCopy())
+	if configMap.Annotations == nil {
+		configMap.Annotations = make(map[string]string)
+	}
+	configMap.Annotations[reloadedHashAnnotation] = hash
+	return r.Patch(ctx, configMap, patch)
 }
 
 func (r *BlackboxModuleReconciler) triggerReload(ctx context.Context) error {
