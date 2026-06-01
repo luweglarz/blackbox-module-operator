@@ -37,7 +37,7 @@ spec:
 4. Each module is keyed as `<namespace>/<name>` in the `config.yml` data.
 5. After updating the ConfigMap, the operator triggers a reload on blackbox_exporter via its `/-/reload` HTTP endpoint (if `--blackbox-reload-url` is configured).
 
-> **Note:** blackbox_exporter must be started with `--web.enable-lifecycle` for the reload endpoint to work.
+> **Note:** blackbox_exporter serves the `/-/reload` endpoint by default (it can also reload on `SIGHUP`), so no extra flag is required. The ConfigMap is consumed as a mounted volume, so there is a propagation delay between the operator updating the ConfigMap and the new file being visible to the blackbox_exporter pod; `--reload-delay` accounts for this before the reload is triggered.
 
 ### Secrets
 
