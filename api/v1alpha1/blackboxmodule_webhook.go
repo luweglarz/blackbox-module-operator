@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -92,5 +93,34 @@ func (r *BlackboxModule) validateBlackboxModule() (admission.Warnings, error) {
 		warnings = append(warnings, "grpc config is set but prober is not 'grpc'; it will be ignored")
 	}
 
+	if err := r.validateNoInlineSecrets(); err != nil {
+		return warnings, err
+	}
+
 	return warnings, nil
+}
+
+// validateNoInlineSecrets rejects credentials supplied inline in the spec. The operator
+// serializes the spec into a shared ConfigMap, so an inline secret would be persisted in
+// plaintext and readable by anyone with get access to that ConfigMap. The file- and
+// secret-ref-based variants must be used instead.
+func (r *BlackboxModule) validateNoInlineSecrets() error {
+	h := r.Spec.HTTP
+	if h == nil {
+		return nil
+	}
+	var errs []string
+	if h.BasicAuth != nil && h.BasicAuth.Password != "" {
+		errs = append(errs, "http.basicAuth.password must not be set inline; use http.basicAuth.passwordFile instead to avoid persisting the secret in the ConfigMap in plaintext")
+	}
+	if h.Authorization != nil && h.Authorization.Credentials != "" {
+		errs = append(errs, "http.authorization.credentials must not be set inline; use http.authorization.credentialsFile instead to avoid persisting the secret in the ConfigMap in plaintext")
+	}
+	if h.OAuth2 != nil && h.OAuth2.ClientSecret != "" {
+		errs = append(errs, "http.oauth2.clientSecret must not be set inline; use http.oauth2.clientSecretFile or http.oauth2.clientSecretRef instead to avoid persisting the secret in the ConfigMap in plaintext")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
 }
