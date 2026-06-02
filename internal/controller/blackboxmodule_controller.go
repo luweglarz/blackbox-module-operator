@@ -147,6 +147,11 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 	}
 
 	var configMap corev1.ConfigMap
+	// configWritten records whether this reconcile created or updated the ConfigMap.
+	// When it did, the new data still needs to propagate to the blackbox_exporter pod's
+	// mounted volume before a reload makes sense, so the reload is deferred to a later
+	// reconcile rather than performed inline (see the reload block below).
+	configWritten := false
 	err = r.Get(ctx, types.NamespacedName{Name: r.ConfigMapName, Namespace: r.ConfigMapNamespace}, &configMap)
 	if err != nil {
 		if client.IgnoreNotFound(err) != nil {
@@ -170,6 +175,7 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ConfigMapCreateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
+		configWritten = true
 	} else if configMap.Data["config.yml"] != string(newConfigYAML) {
 		logger.Info("Updating Blackbox Exporter ConfigMap")
 		if configMap.Data == nil {
@@ -181,6 +187,7 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 			r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "UpdateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
+		configWritten = true
 	} else {
 		logger.Info("Blackbox Exporter configuration is already up to date")
 	}
@@ -192,6 +199,16 @@ func (r *BlackboxModuleReconciler) syncConfig(ctx context.Context) (ctrl.Result,
 	if r.ReloadURL != "" {
 		newHash := hashConfig(newConfigYAML)
 		if configMap.Annotations[reloadedHashAnnotation] != newHash {
+			// If the ConfigMap was just written, give Kubernetes time to propagate the
+			// new data into the blackbox_exporter pod's mounted volume before reloading.
+			// Instead of sleeping in the reconcile worker (which would block it from
+			// handling other modules), requeue and perform the reload on the next pass,
+			// when configWritten is false and we fall through to triggerReload directly.
+			if configWritten && r.ReloadDelay > 0 {
+				logger.Info("Requeuing to allow ConfigMap volume propagation before reload", "delay", r.ReloadDelay)
+				r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionTrue, "ConfigSynced", "Module successfully synced to ConfigMap")
+				return ctrl.Result{RequeueAfter: r.ReloadDelay}, nil
+			}
 			if err := r.triggerReload(ctx); err != nil {
 				logger.Error(err, "failed to trigger blackbox_exporter reload")
 				r.setConditionForAll(ctx, &blackboxModules, metav1.ConditionFalse, "ReloadFailed", err.Error())
@@ -231,14 +248,6 @@ func (r *BlackboxModuleReconciler) triggerReload(ctx context.Context) error {
 		return nil
 	}
 	logger := log.FromContext(ctx)
-	if r.ReloadDelay > 0 {
-		logger.Info("Waiting for ConfigMap volume propagation", "delay", r.ReloadDelay)
-		select {
-		case <-time.After(r.ReloadDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	logger.Info("Triggering blackbox_exporter reload", "url", r.ReloadURL)
 
 	timeout := r.ReloadTimeout
