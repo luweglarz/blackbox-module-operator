@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -235,9 +236,12 @@ var _ = Describe("BlackboxModule Controller - Reload retry", func() {
 	const moduleName = "bbm-reload"
 
 	BeforeEach(func() {
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{
+		err := k8sClient.Create(ctx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: ns},
-		})).To(Succeed())
+		})
+		if err != nil && !errors.IsAlreadyExists(err) {
+			Expect(err).NotTo(HaveOccurred())
+		}
 		Expect(k8sClient.Create(ctx, &modulev1alpha1.BlackboxModule{
 			ObjectMeta: metav1.ObjectMeta{Name: moduleName, Namespace: ns},
 			Spec: modulev1alpha1.BlackboxModuleSpec{
@@ -254,6 +258,11 @@ var _ = Describe("BlackboxModule Controller - Reload retry", func() {
 			_ = k8sClient.Update(ctx, module)
 			_ = k8sClient.Delete(ctx, module)
 		}
+		// Remove the ConfigMap so leftover data/reload-hash state does not leak
+		// between specs in this block.
+		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: ns},
+		})
 	})
 
 	It("retries the reload on a later reconcile after a transient reload failure", func() {
@@ -302,5 +311,45 @@ var _ = Describe("BlackboxModule Controller - Reload retry", func() {
 		Expect(atomic.LoadInt32(&calls)).To(Equal(int32(2)))
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: ns}, cm)).To(Succeed())
 		Expect(cm.Annotations[reloadedHashAnnotation]).To(Equal(reloadedHash))
+	})
+
+	It("defers the reload by requeuing when a reload delay is configured", func() {
+		var calls int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		const reloadDelay = 7 * time.Second
+		reconciler := &BlackboxModuleReconciler{
+			Client:             k8sClient,
+			Scheme:             k8sClient.Scheme(),
+			ConfigMapNamespace: ns,
+			ConfigMapName:      cmName,
+			ReloadURL:          server.URL,
+			ReloadDelay:        reloadDelay,
+		}
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: moduleName, Namespace: ns}}
+
+		By("writing the ConfigMap and requeuing instead of reloading inline")
+		result, err := reconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(reloadDelay))
+		Expect(atomic.LoadInt32(&calls)).To(BeZero())
+
+		cm := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: ns}, cm)).To(Succeed())
+		Expect(cm.Data).To(HaveKey("config.yml"))
+		Expect(cm.Annotations).NotTo(HaveKey(reloadedHashAnnotation))
+
+		By("performing the reload on the requeued reconcile, with no further delay")
+		result, err = reconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeZero())
+		Expect(atomic.LoadInt32(&calls)).To(Equal(int32(1)))
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: ns}, cm)).To(Succeed())
+		Expect(cm.Annotations).To(HaveKey(reloadedHashAnnotation))
 	})
 })
